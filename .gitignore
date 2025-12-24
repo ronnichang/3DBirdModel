@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv*/
+.env
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Large data (your photos)
+data/
+**/data/
+
+# Generated outputs
+_work/
+_outputs/
+*.log
+
+# Misc
+*.tmp
+*.code-workspace
