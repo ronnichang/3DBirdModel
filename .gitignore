@@ -12,9 +12,12 @@ venv*/
 .vscode/
 .idea/
 
-# Large data (your photos)
+# Large data (e.g., photos)
 data/
 **/data/
+
+# Large model file
+*.pt
 
 # Generated outputs
 _work/
