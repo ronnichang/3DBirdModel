@@ -6,6 +6,7 @@ from bird3d.config import Config
 from bird3d.io_utils import list_bird_folders, list_images, ensure_clean_dir, copy_images
 from bird3d.colmap_sfm import run_sfm_sparse
 from bird3d.metrics_sfm import export_model_to_txt, registered_images_best_effort
+from bird3d.colmap_dense import run_dense_fused_pointcloud
 
 
 def parse_args():
@@ -17,6 +18,17 @@ def parse_args():
     ap.add_argument("--clean", action="store_true", help="Delete _work/<bird> and recompute")
     ap.add_argument("--resume", action="store_true",
                 help="Skip birds that already have outputs in _outputs/<bird>/sparse_txt/")
+    ap.add_argument("--stage", choices=["sfm", "dense", "all"], default="sfm",
+                    help="What to run: sfm, dense, or all")
+    ap.add_argument("--dense_max_image_size", type=int, default=None,
+                    help="Max image size for dense steps (undistort/patch-match/fusion). Lower = faster/less RAM.")
+    ap.add_argument("--dense_geom_consistency", action="store_true",
+                    help="Enable geometric consistency in patch-match stereo (slower, sometimes cleaner).")
+    ap.add_argument("--dense_patchmatch_cache_gb", type=int, default=None,
+                    help="PatchMatchStereo.cache_size (GB)")
+    ap.add_argument("--dense_fusion_cache_gb", type=int, default=None,
+                    help="StereoFusion.cache_size (GB)")
+
     return ap.parse_args()
 
 
@@ -38,6 +50,15 @@ def main():
     cfg.colmap_bin = str(cb)
 
     cfg.matcher = args.matcher
+
+    if args.dense_max_image_size is not None:
+        cfg.dense_max_image_size = args.dense_max_image_size
+    if args.dense_geom_consistency:
+        cfg.dense_geom_consistency = True
+    if args.dense_patchmatch_cache_gb is not None:
+        cfg.dense_patchmatch_cache_size_gb = args.dense_patchmatch_cache_gb
+    if args.dense_fusion_cache_gb is not None:
+        cfg.dense_fusion_cache_size_gb = args.dense_fusion_cache_gb
 
     work_root = project_dir / "_work"
     out_root = project_dir / "_outputs"
@@ -78,7 +99,8 @@ def main():
             )
             print(f"[SKIP] Existing result. [OK] Registered images: {registered} / {len(imgs)}")
             print(f"TXT model: {sparse_txt}")
-            continue
+            if args.stage == "sfm":
+                continue
         elif args.resume and (not args.clean) and model0.exists():
             # Re-export TXT from existing binary model (fast)
             export_model_to_txt(cfg.colmap_bin, model0, sparse_txt)
@@ -89,7 +111,8 @@ def main():
             )
             print(f"[SKIP] Re-exported TXT. [OK] Registered images: {registered} / {len(imgs)}")
             print(f"TXT model: {sparse_txt}")
-            continue        
+            if args.stage == "sfm":
+                continue        
 
         clean_dir = bird_work / "images_clean"
         exts = {".jpg", ".jpeg", ".png"}
@@ -112,6 +135,28 @@ def main():
             camera_model=cfg.camera_model,
             single_camera=cfg.single_camera,
         )
+
+        # Stage 2: Dense point cloud
+        if args.stage in ("dense", "all"):
+            dense_out_dir = out_root / bird / "dense"
+            fused_out = dense_out_dir / "fused.ply"
+
+            # Dense workspace lives in _work (big intermediate files)
+            dense_ws = bird_work / "dense" / "0"
+
+            run_dense_fused_pointcloud(
+                colmap_bin=cfg.colmap_bin,
+                images_dir=clean_dir,
+                sparse_model_dir=sparse_bin,
+                dense_workspace_dir=dense_ws,
+                fused_out_ply=fused_out,
+                max_image_size=cfg.dense_max_image_size,
+                geom_consistency=cfg.dense_geom_consistency,
+                patchmatch_cache_size_gb=cfg.dense_patchmatch_cache_size_gb,
+                fusion_cache_size_gb=cfg.dense_fusion_cache_size_gb,
+                clean=args.clean,
+                resume=args.resume,
+            )
 
         # Export to TXT for easy metric parsing
         export_model_to_txt(cfg.colmap_bin, sparse_bin, sparse_txt)
