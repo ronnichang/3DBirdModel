@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+
 @dataclass
 class Config:
     colmap_bin: str = r"..\TOOLS\colmap-x64-windows-nocuda\bin\colmap.exe" 

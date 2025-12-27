@@ -5,7 +5,7 @@ from pathlib import Path
 from bird3d.config import Config
 from bird3d.io_utils import list_bird_folders, list_images, ensure_clean_dir, copy_images
 from bird3d.colmap_sfm import run_sfm_sparse
-from bird3d.metrics_sfm import export_model_to_txt, count_registered_images
+from bird3d.metrics_sfm import export_model_to_txt, registered_images_best_effort
 
 
 def parse_args():
@@ -71,14 +71,22 @@ def main():
         images_txt = sparse_txt / "images.txt"
         model0 = bird_work / "sparse" / "0"
         if args.resume and (not args.clean) and images_txt.exists():
-            registered = count_registered_images(images_txt)
+            registered = registered_images_best_effort(
+                cfg.colmap_bin,
+                sparse_txt,
+                images_txt_fallback=images_txt,
+            )
             print(f"[SKIP] Existing result. [OK] Registered images: {registered} / {len(imgs)}")
             print(f"TXT model: {sparse_txt}")
             continue
         elif args.resume and (not args.clean) and model0.exists():
             # Re-export TXT from existing binary model (fast)
             export_model_to_txt(cfg.colmap_bin, model0, sparse_txt)
-            registered = count_registered_images(images_txt)
+            registered = registered_images_best_effort(
+                cfg.colmap_bin,
+                sparse_txt,
+                images_txt_fallback=images_txt,
+            )
             print(f"[SKIP] Re-exported TXT. [OK] Registered images: {registered} / {len(imgs)}")
             print(f"TXT model: {sparse_txt}")
             continue        
@@ -108,7 +116,11 @@ def main():
         # Export to TXT for easy metric parsing
         export_model_to_txt(cfg.colmap_bin, sparse_bin, sparse_txt)
 
-        registered = count_registered_images(sparse_txt / "images.txt")
+        registered = registered_images_best_effort(
+            cfg.colmap_bin,
+            sparse_bin,  # analyze the BIN model we just produced
+            images_txt_fallback=(sparse_txt / "images.txt"),
+        )
         print(f"[OK] Registered images: {registered} / {len(imgs)}")
         print(f"TXT model: {sparse_txt}")
 
