@@ -30,13 +30,14 @@ def main():
 
     cfg = Config()
     
-    cb = Path(cfg.colmap_bin)
+    # Choose colmap path: CLI override wins, else config default
+    colmap_path = args.colmap_bin if args.colmap_bin else cfg.colmap_bin
+    cb = Path(colmap_path)
     if not cb.is_absolute():
-        cfg.colmap_bin = str((project_dir / cb).resolve())    
-    
+        cb = (project_dir / cb).resolve()
+    cfg.colmap_bin = str(cb)
+
     cfg.matcher = args.matcher
-    if args.colmap_bin:
-        cfg.colmap_bin = args.colmap_bin
 
     work_root = project_dir / "_work"
     out_root = project_dir / "_outputs"
@@ -66,23 +67,32 @@ def main():
         else:
             bird_work.mkdir(parents=True, exist_ok=True)
 
-        clean_dir = bird_work / "images_clean"
-        copy_images(imgs, clean_dir)
-
         sparse_txt = out_root / bird / "sparse_txt"
         images_txt = sparse_txt / "images.txt"
         model0 = bird_work / "sparse" / "0"
-        if args.resume and images_txt.exists():
+        if args.resume and (not args.clean) and images_txt.exists():
             registered = count_registered_images(images_txt)
             print(f"[SKIP] Existing result. [OK] Registered images: {registered} / {len(imgs)}")
             print(f"TXT model: {sparse_txt}")
             continue
-        elif args.resume and model0.exists():
+        elif args.resume and (not args.clean) and model0.exists():
             # Re-export TXT from existing binary model (fast)
             export_model_to_txt(cfg.colmap_bin, model0, sparse_txt)
             registered = count_registered_images(images_txt)
             print(f"[SKIP] Re-exported TXT. [OK] Registered images: {registered} / {len(imgs)}")
+            print(f"TXT model: {sparse_txt}")
             continue        
+
+        clean_dir = bird_work / "images_clean"
+        exts = {".jpg", ".jpeg", ".png"}
+        existing_imgs = []
+        if clean_dir.exists():
+            existing_imgs = [p for p in clean_dir.iterdir()
+                            if p.is_file() and p.suffix.lower() in exts]
+        if (not clean_dir.exists()) or (len(existing_imgs) != len(imgs)):
+            copy_images(imgs, clean_dir)
+        else:
+            print("[SKIP] images_clean already prepared")
 
         # Run SfM (sparse)
         sparse_bin = run_sfm_sparse(
@@ -96,7 +106,6 @@ def main():
         )
 
         # Export to TXT for easy metric parsing
-        sparse_txt = out_root / bird / "sparse_txt"
         export_model_to_txt(cfg.colmap_bin, sparse_bin, sparse_txt)
 
         registered = count_registered_images(sparse_txt / "images.txt")
