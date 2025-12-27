@@ -7,6 +7,8 @@ from bird3d.io_utils import list_bird_folders, list_images, ensure_clean_dir, co
 from bird3d.colmap_sfm import run_sfm_sparse
 from bird3d.metrics_sfm import export_model_to_txt, registered_images_best_effort
 from bird3d.colmap_dense import run_dense_fused_pointcloud
+from bird3d.openmvs_dense import run_openmvs_dense_pointcloud
+from bird3d.colmap_dense import ColmapCudaRequiredError
 
 
 def parse_args():
@@ -28,6 +30,12 @@ def parse_args():
                     help="PatchMatchStereo.cache_size (GB)")
     ap.add_argument("--dense_fusion_cache_gb", type=int, default=None,
                     help="StereoFusion.cache_size (GB)")
+    ap.add_argument("--dense_backend", choices=["colmap", "openmvs"], default=None,
+                    help="Dense backend: 'colmap' (CUDA-only) or 'openmvs' (CPU capable).")
+    ap.add_argument("--openmvs_bin", default=None,
+                    help="Path to OpenMVS bin folder containing InterfaceCOLMAP.exe, DensifyPointCloud.exe, etc.")
+    ap.add_argument("--openmvs_resolution_level", type=int, default=None,
+                    help="OpenMVS DensifyPointCloud --resolution-level (2 or 3 recommended for speed/memory).")
 
     return ap.parse_args()
 
@@ -59,6 +67,13 @@ def main():
         cfg.dense_patchmatch_cache_size_gb = args.dense_patchmatch_cache_gb
     if args.dense_fusion_cache_gb is not None:
         cfg.dense_fusion_cache_size_gb = args.dense_fusion_cache_gb
+
+    if args.dense_backend is not None:
+        cfg.dense_backend = args.dense_backend
+    if args.openmvs_bin is not None:
+        cfg.openmvs_bin = args.openmvs_bin
+    if args.openmvs_resolution_level is not None:
+        cfg.openmvs_resolution_level = args.openmvs_resolution_level
 
     work_root = project_dir / "_work"
     out_root = project_dir / "_outputs"
@@ -141,22 +156,42 @@ def main():
             dense_out_dir = out_root / bird / "dense"
             fused_out = dense_out_dir / "fused.ply"
 
-            # Dense workspace lives in _work (big intermediate files)
+            # Dense workspace lives in _work
             dense_ws = bird_work / "dense" / "0"
 
-            run_dense_fused_pointcloud(
-                colmap_bin=cfg.colmap_bin,
-                images_dir=clean_dir,
-                sparse_model_dir=sparse_bin,
-                dense_workspace_dir=dense_ws,
-                fused_out_ply=fused_out,
-                max_image_size=cfg.dense_max_image_size,
-                geom_consistency=cfg.dense_geom_consistency,
-                patchmatch_cache_size_gb=cfg.dense_patchmatch_cache_size_gb,
-                fusion_cache_size_gb=cfg.dense_fusion_cache_size_gb,
-                clean=args.clean,
-                resume=args.resume,
-            )
+            if cfg.dense_backend == "colmap":
+                try:
+                    run_dense_fused_pointcloud(
+                        colmap_bin=cfg.colmap_bin,
+                        images_dir=clean_dir,
+                        sparse_model_dir=sparse_bin,
+                        dense_workspace_dir=dense_ws,
+                        fused_out_ply=fused_out,
+                        max_image_size=cfg.dense_max_image_size,
+                        geom_consistency=cfg.dense_geom_consistency,
+                        patchmatch_cache_size_gb=cfg.dense_patchmatch_cache_size_gb,
+                        fusion_cache_size_gb=cfg.dense_fusion_cache_size_gb,
+                        clean=args.clean,
+                        resume=args.resume,
+                    )
+                except ColmapCudaRequiredError as e:
+                    print("\n[ERROR] COLMAP dense backend cannot run here:")
+                    print(e)
+                    print("\nUse OpenMVS instead:")
+                    print("  python main_build_3dbird.py --project . --stage dense --dense_backend openmvs --resume")
+                    raise
+            else:
+                # OpenMVS CPU backend
+                run_openmvs_dense_pointcloud(
+                    openmvs_bin=Path(cfg.openmvs_bin),
+                    colmap_model_dir=sparse_bin,
+                    images_dir=clean_dir,
+                    work_dir=dense_ws,
+                    dense_ply_out=fused_out,
+                    resolution_level=cfg.openmvs_resolution_level,
+                    clean=args.clean,
+                    resume=args.resume,
+                )
 
         # Export to TXT for easy metric parsing
         export_model_to_txt(cfg.colmap_bin, sparse_bin, sparse_txt)

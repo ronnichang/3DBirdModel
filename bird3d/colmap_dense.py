@@ -5,12 +5,28 @@ from pathlib import Path
 from .io_utils import ensure_clean_dir
 
 
+class ColmapCudaRequiredError(RuntimeError):
+    pass
+
+
 def run(cmd):
     print("\n>>", " ".join(str(x) for x in cmd))
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
     if p.returncode != 0:
-        print(p.stdout)
+        out = p.stdout or ""
+        print(out)
+
+        # Make the failure actionable.
+        if "Dense stereo reconstruction requires CUDA" in out:
+            raise ColmapCudaRequiredError(
+                "COLMAP dense reconstruction (patch_match_stereo / stereo_fusion) requires CUDA.\n"
+                "Your current COLMAP build is 'nocuda' and/or your machine has no CUDA GPU.\n"
+                "Use an external dense backend (e.g., OpenMVS) for Stage 2.1 on CPU."
+            )
+
         raise RuntimeError(f"Command failed (code={p.returncode})")
+
     return p.stdout
 
 

@@ -13,3 +13,6 @@ class Config:
     dense_geom_consistency: bool = False
     dense_patchmatch_cache_size_gb: int = 4
     dense_fusion_cache_size_gb: int = 4
+    dense_backend: str = "openmvs"  # "colmap" or "openmvs"
+    openmvs_bin: str = r"..\TOOLS\openMVS\bin"
+    openmvs_resolution_level: int = 2
