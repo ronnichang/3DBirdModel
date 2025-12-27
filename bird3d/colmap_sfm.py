@@ -3,6 +3,7 @@ from pathlib import Path
 
 from .io_utils import ensure_clean_dir
 
+
 def run(cmd):
     print("\n>>", " ".join(str(x) for x in cmd))
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -10,6 +11,7 @@ def run(cmd):
         print(p.stdout)
         raise RuntimeError(f"Command failed (code={p.returncode})")
     return p.stdout
+
 
 def run_sfm_sparse(
     *,
@@ -25,33 +27,44 @@ def run_sfm_sparse(
     Runs: feature_extractor -> matcher -> mapper
     Returns: sparse model directory (BIN), e.g. work_dir/sparse/0
     """
-    db_path = work_dir / "database.db"
+    model0 = work_dir / "sparse" / "0"
+    if model0.exists():
+        return model0
+
     sparse_dir = work_dir / "sparse"
     ensure_clean_dir(sparse_dir)
+    db_path = work_dir / "database.db"
+    db_exists = db_path.exists()
 
-    # Feature extraction
-    cmd = [
-        colmap_bin, "feature_extractor",
-        "--database_path", str(db_path),
-        "--image_path", str(images_dir),
-        "--ImageReader.camera_model", camera_model,
-        "--ImageReader.single_camera", "1" if single_camera else "0",
-    ]
-    if not use_gpu:
-        cmd += ["--FeatureExtraction.use_gpu", "0"]
-    run(cmd)
-
-    # Matching
-    if matcher == "sequential":
-        cmd = [colmap_bin, "sequential_matcher", "--database_path", str(db_path)]
-    elif matcher == "exhaustive":
-        cmd = [colmap_bin, "exhaustive_matcher", "--database_path", str(db_path)]
+    # Feature extraction (skip if DB already exists)
+    if not db_exists:
+        cmd = [
+            colmap_bin, "feature_extractor",
+            "--database_path", str(db_path),
+            "--image_path", str(images_dir),
+            "--ImageReader.camera_model", camera_model,
+            "--ImageReader.single_camera", "1" if single_camera else "0",
+        ]
+        if not use_gpu:
+            cmd += ["--FeatureExtraction.use_gpu", "0"]
+        run(cmd)
     else:
-        raise ValueError("matcher must be 'sequential' or 'exhaustive'")
+        print(f"[SKIP] feature_extractor (database exists): {db_path}")
 
-    if not use_gpu:
-        cmd += ["--FeatureMatching.use_gpu", "0"]
-    run(cmd)
+    # Matching (skip if DB already exists)
+    if not db_exists:
+        if matcher == "sequential":
+            cmd = [colmap_bin, "sequential_matcher", "--database_path", str(db_path)]
+        elif matcher == "exhaustive":
+            cmd = [colmap_bin, "exhaustive_matcher", "--database_path", str(db_path)]
+        else:
+            raise ValueError("matcher must be 'sequential' or 'exhaustive'")
+
+        if not use_gpu:
+            cmd += ["--FeatureMatching.use_gpu", "0"]
+        run(cmd)
+    else:
+        print(f"[SKIP] matcher (database exists): {db_path}")
 
     # Mapping
     run([

@@ -14,6 +14,9 @@ def parse_args():
     ap.add_argument("--data_dir", default="data", help="Relative path under project (default: data)")
     ap.add_argument("--matcher", choices=["sequential", "exhaustive"], default="sequential")
     ap.add_argument("--colmap_bin", default=None, help="Path to colmap executable if not on PATH")
+    ap.add_argument("--clean", action="store_true", help="Delete _work/<bird> and recompute")
+    ap.add_argument("--resume", action="store_true",
+                help="Skip birds that already have outputs in _outputs/<bird>/sparse_txt/")
     return ap.parse_args()
 
 
@@ -58,10 +61,28 @@ def main():
 
         # Work dirs
         bird_work = work_root / bird
-        ensure_clean_dir(bird_work)
+        if args.clean:
+            ensure_clean_dir(bird_work)
+        else:
+            bird_work.mkdir(parents=True, exist_ok=True)
 
         clean_dir = bird_work / "images_clean"
         copy_images(imgs, clean_dir)
+
+        sparse_txt = out_root / bird / "sparse_txt"
+        images_txt = sparse_txt / "images.txt"
+        model0 = bird_work / "sparse" / "0"
+        if args.resume and images_txt.exists():
+            registered = count_registered_images(images_txt)
+            print(f"[SKIP] Existing result. [OK] Registered images: {registered} / {len(imgs)}")
+            print(f"TXT model: {sparse_txt}")
+            continue
+        elif args.resume and model0.exists():
+            # Re-export TXT from existing binary model (fast)
+            export_model_to_txt(cfg.colmap_bin, model0, sparse_txt)
+            registered = count_registered_images(images_txt)
+            print(f"[SKIP] Re-exported TXT. [OK] Registered images: {registered} / {len(imgs)}")
+            continue        
 
         # Run SfM (sparse)
         sparse_bin = run_sfm_sparse(
