@@ -2,9 +2,59 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 
-def _run(cmd, cwd: Path | None = None):
+def _prepare_colmap_input_for_openmvs(colmap_root: Path, work_dir: Path) -> Path:
+    """
+    OpenMVS InterfaceCOLMAP expects:
+        <input>/sparse/cameras.bin (or cameras.txt), images.bin, points3D.bin
+    but COLMAP typically writes:
+        <root>/sparse/0/cameras.bin ...
+
+    We create a small shim workspace:
+        <work_dir>/_colmap_ws/sparse/{cameras.bin,images.bin,points3D.bin}
+    by copying from <colmap_root>/sparse/0/* when needed.
+    """
+    colmap_root = Path(colmap_root)
+    work_dir = Path(work_dir)
+
+    # Where OpenMVS will look:
+    sparse_dir = colmap_root / "sparse"
+    need_bin = ["cameras.bin", "images.bin", "points3D.bin"]
+    need_txt = ["cameras.txt", "images.txt", "points3D.txt"]
+
+    # If already flat, use it directly
+    if all((sparse_dir / f).exists() for f in need_bin) or all((sparse_dir / f).exists() for f in need_txt):
+        return colmap_root
+
+    # Otherwise, try sparse/0
+    sparse0 = sparse_dir / "0"
+    src_files = None
+    if all((sparse0 / f).exists() for f in need_bin):
+        src_files = need_bin
+    elif all((sparse0 / f).exists() for f in need_txt):
+        src_files = need_txt
+
+    if src_files is None:
+        raise RuntimeError(
+            "OpenMVS InterfaceCOLMAP cannot find COLMAP model files.\n"
+            f"Expected either {sparse_dir}/{{cameras,images,points3D}}.(bin|txt) "
+            f"or {sparse0}/{{cameras,images,points3D}}.(bin|txt)"
+        )
+
+    # Create shim workspace under the OpenMVS work dir
+    shim = work_dir / "_colmap_ws"
+    shim_sparse = shim / "sparse"
+    shim_sparse.mkdir(parents=True, exist_ok=True)
+
+    for f in src_files:
+        shutil.copy2(sparse0 / f, shim_sparse / f)
+
+    return shim
+
+
+def _run(cmd, cwd: Optional[Path] = None):
     print("\n>>", " ".join(str(x) for x in cmd))
     p = subprocess.run(
         cmd,
@@ -86,11 +136,12 @@ def run_openmvs_dense_pointcloud(
     if (not resume) or clean or (not scene_mvs.exists()):
         # Example usage appears in OpenMVS community reports:
         # interfaceCOLMAP.exe -i <colmap_model_dir> -o scene.mvs --image-folder <images_dir> :contentReference[oaicite:3]{index=3}
+        colmap_input = _prepare_colmap_input_for_openmvs(colmap_model_dir, work_dir)
         cmd = [
-            str(interface),
-            "-i", str(colmap_model_dir),
-            "-o", str(scene_mvs),
-            "--image-folder", str(images_dir),
+                str(interface),
+                "-i", str(colmap_input),
+                "-o", str(scene_mvs),
+                "--image-folder", str(images_dir),
         ]
         _run(cmd, cwd=work_dir)
     else:

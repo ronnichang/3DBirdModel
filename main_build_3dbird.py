@@ -84,7 +84,7 @@ def main():
     if not bird_dirs:
         raise RuntimeError(f"No bird folders under: {data_dir}")
 
-    for bird_dir in bird_dirs:
+    for bird_dir in bird_dirs[0:1]:
         bird = bird_dir.name
         print("\n==============================")
         print(f"Bird: {bird}")
@@ -184,7 +184,7 @@ def main():
                 # OpenMVS CPU backend
                 run_openmvs_dense_pointcloud(
                     openmvs_bin=Path(cfg.openmvs_bin),
-                    colmap_model_dir=sparse_bin,
+                    colmap_model_dir=bird_work,
                     images_dir=clean_dir,
                     work_dir=dense_ws,
                     dense_ply_out=fused_out,
